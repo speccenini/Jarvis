@@ -1,0 +1,26 @@
+# Telegram Bot
+python-telegram-bot>=21.0
+
+# Web Framework
+fastapi>=0.104
+uvicorn>=0.24
+pydantic>=2.0
+
+# Data and Database
+sqlalchemy>=2.0
+
+# Vector/Document tools (for later)
+# chromadb>=0.4
+# sentence-transformers>=2.5
+
+# File parsing
+pypdf>=4.0
+python-docx>=0.8
+
+# Optional: Browser automation (for later)
+# playwright>=1.40
+
+# Dev
+pytest>=7.4
+pytest-asyncio>=0.23
+black>=24.0

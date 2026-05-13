@@ -1,0 +1,5 @@
+{"timestamp": "2026-05-13T19:18:39.706137", "user_id": 7653619239, "username": "unknown", "action": "command_start", "details": {"command": "/start"}}
+{"timestamp": "2026-05-13T19:18:48.371134", "user_id": 7653619239, "username": "unknown", "action": "health_check", "details": {}}
+{"timestamp": "2026-05-13T19:18:55.069391", "user_id": 7653619239, "username": "unknown", "action": "list_tools", "details": {}}
+{"timestamp": "2026-05-13T19:19:19.227677", "user_id": 7653619239, "username": "unknown", "action": "tool_codex", "details": {"prompt_length": 25, "status": "success"}}
+{"timestamp": "2026-05-13T19:22:45.720484", "user_id": 7653619239, "username": "unknown", "action": "tool_browser_search", "details": {"query": "montafon", "type": "google"}}

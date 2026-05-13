@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="logo-section">
+            <div class="logo">J</div>
+            <h1>JARVIS</h1>
+        </div>
+        
+        <div class="search-section">
+            <form id="search-form" onsubmit="handleSearch(event)">
+                <div class="search-box">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        placeholder="Chiedimi qualcosa..." 
+                        autofocus
+                    >
+                </div>
+                
+                <div class="button-group">
+                    <button type="button" class="btn" onclick="handleSearch(event)">
+                        🔍 Ricerca
+                    </button>
+                    <button type="button" class="btn" onclick="handleCodex()">
+                        💻 Codex
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="quick-actions">
+            <h3>🚀 Quick Access</h3>
+            <div class="action-buttons">
+                <button class="action-btn" onclick="searchQuery('javascript tutorial')">
+                    <span class="emoji">💡</span>
+                    <span>Tutorial</span>
+                </button>
+                <button class="action-btn" onclick="searchQuery('python best practices')">
+                    <span class="emoji">🐍</span>
+                    <span>Python</span>
+                </button>
+                <button class="action-btn" onclick="openTelegram()">
+                    <span class="emoji">📱</span>
+                    <span>Telegram</span>
+                </button>
+                <button class="action-btn" onclick="showStatus()">
+                    <span class="emoji">✅</span>
+                    <span>Status</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="response" class="response-section"></div>
+
+        <footer>
+            <p>Jarvis v1.0 | Local AI Assistant</p>
+        </footer>
+    </div>
+
+    <script>
+        function handleSearch(event) {
+            if (event) event.preventDefault();
+            const query = document.getElementById('search-input').value.trim();
+            if (query) {
+                searchQuery(query);
+            }
+        }
+
+        function searchQuery(query) {
+            const responseDiv = document.getElementById('response');
+            responseDiv.innerHTML = '<p class="loading">🔍 Cercando: <strong>' + query + '</strong></p>';
+            
+            fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: query })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'opened') {
+                    responseDiv.innerHTML = '<p class="success">✅ ' + data.message + '</p>';
+                } else {
+                    responseDiv.innerHTML = '<p class="error">❌ ' + data.message + '</p>';
+                }
+            })
+            .catch(err => {
+                responseDiv.innerHTML = '<p class="error">❌ Errore: ' + err.message + '</p>';
+            });
+        }
+
+        function handleCodex() {
+            const query = document.getElementById('search-input').value.trim();
+            if (query) {
+                const responseDiv = document.getElementById('response');
+                responseDiv.innerHTML = '<p class="loading">⏳ Calling Codex...</p>';
+                
+                fetch('/api/codex', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: query })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        responseDiv.innerHTML = '<div class="codex-response"><pre>' + 
+                            data.result.substring(0, 1000) + 
+                            (data.result.length > 1000 ? '...' : '') +
+                            '</pre></div>';
+                    } else {
+                        responseDiv.innerHTML = '<p class="error">❌ ' + data.error + '</p>';
+                    }
+                })
+                .catch(err => {
+                    responseDiv.innerHTML = '<p class="error">❌ Errore: ' + err.message + '</p>';
+                });
+            }
+        }
+
+        function showStatus() {
+            const responseDiv = document.getElementById('response');
+            responseDiv.innerHTML = '<p class="loading">⏳ Checking status...</p>';
+            
+            fetch('/api/status')
+            .then(r => r.json())
+            .then(data => {
+                const html = `
+                    <div class="status-box">
+                        <h3>✅ System Status</h3>
+                        <p><strong>Backend:</strong> ${data.backend}</p>
+                        <p><strong>Telegram:</strong> ${data.telegram}</p>
+                        <p><strong>Workspace:</strong> ${data.workspace}</p>
+                        <p><strong>Uptime:</strong> ${data.uptime}</p>
+                    </div>
+                `;
+                responseDiv.innerHTML = html;
+            })
+            .catch(err => {
+                responseDiv.innerHTML = '<p class="error">❌ Errore: ' + err.message + '</p>';
+            });
+        }
+
+        function openTelegram() {
+            window.open('https://t.me/jarvis_ai_bot', '_blank');
+        }
+    </script>
+</body>
+</html>
