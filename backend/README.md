@@ -36,6 +36,39 @@ JARVIS_WORKSPACE=/Users/stef/Documents/Jarvis
 CODEX_TIMEOUT_SECONDS=120
 ```
 
+Telegram access is controlled by `backend/telegram_whitelist.json`:
+
+```json
+{
+  "authorized_user_ids": [
+    123456789
+  ]
+}
+```
+
+The real whitelist file is local-only and ignored by Git. A template is tracked
+as `backend/telegram_whitelist.example.json`. If the whitelist file is missing,
+Jarvis falls back to `AUTHORIZED_TELEGRAM_USER_ID` from `.env`.
+
+Filesystem access is controlled by `backend/filesystem_allowlist.json`:
+
+```json
+{
+  "allowed_roots": [
+    {
+      "name": "jarvis_workspace",
+      "path": "/Users/stef/Documents/Jarvis/data/workspace",
+      "read": true,
+      "write": false
+    }
+  ]
+}
+```
+
+The real filesystem allowlist is local-only and ignored by Git. A template is
+tracked as `backend/filesystem_allowlist.example.json`. If the file is missing,
+Jarvis falls back to `JARVIS_WORKSPACE` only.
+
 ### 3. Run the backend
 
 ```bash
@@ -58,7 +91,35 @@ Once running, you can send these commands via Telegram:
 - `/health` - Check if backend is running
 - `/tools` - List available tools
 - `/codex <prompt>` - Run a Codex query
+- `/calendar oggi` - List today's Apple Calendar events
+- `/calendar domani` - List tomorrow's Apple Calendar events
+- `/calendar settimana` - List Apple Calendar events for the next 7 days
 - Any text message - Echo response (more tools coming soon)
+
+You can also ask naturally in Telegram:
+
+```text
+Che appuntamenti ho domani?
+Che riunioni ho questa settimana?
+Mostrami la mia agenda oggi.
+```
+
+## Local HTTP API
+
+The web server exposes local-only API endpoints on `http://localhost:8000`.
+
+Apple Calendar access is read-only:
+
+```bash
+curl http://localhost:8000/api/calendar/today
+curl http://localhost:8000/api/calendar/tomorrow
+curl http://localhost:8000/api/calendar/week
+curl "http://localhost:8000/api/calendar/events?start=2026-05-13&end=2026-05-14"
+```
+
+The first Calendar request may trigger a macOS privacy permission prompt for
+Terminal or the Python runner. Grant Calendar/Automation access in System
+Settings if macOS blocks the request.
 
 ## Core Components
 

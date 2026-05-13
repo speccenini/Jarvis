@@ -14,7 +14,7 @@
         </div>
         
         <div class="search-section">
-            <form id="search-form" onsubmit="handleSearch(event)">
+            <form id="search-form" onsubmit="handleSubmit(event)">
                 <div class="search-box">
                     <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                         <circle cx="11" cy="11" r="8"></circle>
@@ -23,7 +23,7 @@
                     <input 
                         type="text" 
                         id="search-input" 
-                        placeholder="Chiedimi qualcosa..." 
+                        placeholder="/pexmag chiedimi qualcosa..."
                         autofocus
                     >
                 </div>
@@ -69,6 +69,19 @@
     </div>
 
     <script>
+        function handleSubmit(event) {
+            if (event) event.preventDefault();
+            const query = document.getElementById('search-input').value.trim();
+            if (!query) return;
+
+            if (query.toLowerCase().startsWith('/pexmag')) {
+                handlePexmag(query);
+                return;
+            }
+
+            searchQuery(query);
+        }
+
         function handleSearch(event) {
             if (event) event.preventDefault();
             const query = document.getElementById('search-input').value.trim();
@@ -77,9 +90,80 @@
             }
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function formatAssistantText(value) {
+            return escapeHtml(value).replace(/\n/g, '<br>');
+        }
+
+        function handlePexmag(rawQuery) {
+            const prompt = rawQuery.replace(/^\/pexmag\b/i, '').trim();
+            const responseDiv = document.getElementById('response');
+
+            if (!prompt) {
+                responseDiv.innerHTML = `
+                    <div class="chat-panel">
+                        <div class="chat-message assistant">
+                            <div class="chat-label">Pexmag</div>
+                            <div class="chat-bubble">Scrivi una richiesta dopo /pexmag.</div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            responseDiv.innerHTML = `
+                <div class="chat-panel">
+                    <div class="chat-message user">
+                        <div class="chat-label">Tu</div>
+                        <div class="chat-bubble">${escapeHtml(prompt)}</div>
+                    </div>
+                    <div class="chat-message assistant">
+                        <div class="chat-label">Pexmag</div>
+                        <div class="chat-bubble loading-bubble">Sto pensando...</div>
+                    </div>
+                </div>
+            `;
+
+            fetch('/api/codex', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: prompt })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    responseDiv.innerHTML = `
+                        <div class="chat-panel">
+                            <div class="chat-message user">
+                                <div class="chat-label">Tu</div>
+                                <div class="chat-bubble">${escapeHtml(prompt)}</div>
+                            </div>
+                            <div class="chat-message assistant">
+                                <div class="chat-label">Pexmag</div>
+                                <div class="chat-bubble">${formatAssistantText(data.result)}</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    responseDiv.innerHTML = '<p class="error">Errore: ' + escapeHtml(data.error || 'risposta non disponibile') + '</p>';
+                }
+            })
+            .catch(err => {
+                responseDiv.innerHTML = '<p class="error">Errore: ' + escapeHtml(err.message) + '</p>';
+            });
+        }
+
         function searchQuery(query) {
             const responseDiv = document.getElementById('response');
-            responseDiv.innerHTML = '<p class="loading">🔍 Cercando: <strong>' + query + '</strong></p>';
+            responseDiv.innerHTML = '<p class="loading">🔍 Cercando: <strong>' + escapeHtml(query) + '</strong></p>';
             
             fetch('/api/search', {
                 method: 'POST',
@@ -89,13 +173,13 @@
             .then(r => r.json())
             .then(data => {
                 if (data.status === 'opened') {
-                    responseDiv.innerHTML = '<p class="success">✅ ' + data.message + '</p>';
+                    responseDiv.innerHTML = '<p class="success">✅ ' + escapeHtml(data.message) + '</p>';
                 } else {
-                    responseDiv.innerHTML = '<p class="error">❌ ' + data.message + '</p>';
+                    responseDiv.innerHTML = '<p class="error">❌ ' + escapeHtml(data.message) + '</p>';
                 }
             })
             .catch(err => {
-                responseDiv.innerHTML = '<p class="error">❌ Errore: ' + err.message + '</p>';
+                responseDiv.innerHTML = '<p class="error">❌ Errore: ' + escapeHtml(err.message) + '</p>';
             });
         }
 
@@ -113,16 +197,16 @@
                 .then(r => r.json())
                 .then(data => {
                     if (data.status === 'success') {
-                        responseDiv.innerHTML = '<div class="codex-response"><pre>' + 
-                            data.result.substring(0, 1000) + 
+                        responseDiv.innerHTML = '<div class="codex-response"><pre>' +
+                            escapeHtml(data.result.substring(0, 1000)) +
                             (data.result.length > 1000 ? '...' : '') +
                             '</pre></div>';
                     } else {
-                        responseDiv.innerHTML = '<p class="error">❌ ' + data.error + '</p>';
+                        responseDiv.innerHTML = '<p class="error">❌ ' + escapeHtml(data.error) + '</p>';
                     }
                 })
                 .catch(err => {
-                    responseDiv.innerHTML = '<p class="error">❌ Errore: ' + err.message + '</p>';
+                    responseDiv.innerHTML = '<p class="error">❌ Errore: ' + escapeHtml(err.message) + '</p>';
                 });
             }
         }

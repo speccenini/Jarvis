@@ -1,0 +1,39 @@
+# Secrets and local environment
+.env
+*.env
+backend/.env
+backend/telegram_whitelist.json
+backend/filesystem_allowlist.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime data
+logs/
+data/
+backend/output/
+backend/codex-tasks/
+backend/documents/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/

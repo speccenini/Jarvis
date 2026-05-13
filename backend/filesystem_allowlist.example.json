@@ -1,0 +1,16 @@
+{
+  "allowed_roots": [
+    {
+      "name": "jarvis_workspace",
+      "path": "/Users/stef/Documents/Jarvis/data/workspace",
+      "read": true,
+      "write": false
+    },
+    {
+      "name": "jarvis_documents",
+      "path": "/Users/stef/Documents/Jarvis/data/documents",
+      "read": true,
+      "write": false
+    }
+  ]
+}

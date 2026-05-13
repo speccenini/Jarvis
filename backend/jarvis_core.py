@@ -5,6 +5,7 @@ Always-running component that handles Telegram messages and routes to tools.
 
 import logging
 import threading
+from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
@@ -14,6 +15,7 @@ from user_auth import UserAuthenticator
 from tools_registry import ToolsRegistry
 from codex_bridge import run_codex, CodexError
 from browser_tool import BrowserTool
+from calendar_tool import AppleCalendarTool, CalendarError, CalendarEvent
 from web_interface import JarvisWebServer
 
 # Validate configuration on startup
@@ -28,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize core components
 audit_logger = AuditLogger(log_dir=Config.LOG_DIR)
-authenticator = UserAuthenticator(authorized_ids=[Config.AUTHORIZED_TELEGRAM_USER_ID])
+authenticator = UserAuthenticator(authorized_ids=Config.authorized_telegram_user_ids())
 tools_registry = ToolsRegistry()
 
 
@@ -40,9 +42,11 @@ class JarvisCore:
         self.authenticator = authenticator
         self.tools_registry = tools_registry
         self.browser_tool = BrowserTool()
+        self.calendar_tool = AppleCalendarTool(timeout_seconds=Config.TOOL_TIMEOUT_DEFAULT)
         self.web_server = JarvisWebServer(port=web_port)
         self.web_server.set_browser_tool(self.browser_tool)
         self.web_server.set_codex_handler(run_codex)
+        self.web_server.set_calendar_tool(self.calendar_tool)
         logger.info("Jarvis Core initialized")
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -95,6 +99,7 @@ class JarvisCore:
             "Available tools:\n\n"
             "• cerca <query> - Search on Google\n"
             "• codex <prompt> - Query Codex CLI\n"
+            "• calendar oggi|domani|settimana - Read Apple Calendar\n"
             "• health - Check backend status\n"
             "• web - Open web interface\n\n"
             "More tools coming soon!"
@@ -192,6 +197,27 @@ class JarvisCore:
 
         await update.message.reply_text(f"Web interface: {web_url}")
 
+    async def handle_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /calendar command."""
+        user_id = update.effective_user.id
+        username = update.effective_user.username or "unknown"
+
+        if not self.authenticator.is_authorized(user_id):
+            self.audit_logger.log_unauthorized_access(user_id, username, "/calendar")
+            await update.message.reply_text("Access denied.")
+            return
+
+        text = update.message.text.strip()
+        period = self._detect_calendar_period(text)
+
+        if not period:
+            await update.message.reply_text(
+                "Uso: /calendar oggi, /calendar domani, oppure /calendar settimana."
+            )
+            return
+
+        await self._reply_with_calendar(update, user_id, username, period)
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle generic messages."""
         user_id = update.effective_user.id
@@ -215,6 +241,11 @@ class JarvisCore:
             await update.message.reply_text("Pong!")
             return
 
+        calendar_period = self._detect_calendar_period(text)
+        if calendar_period and self._looks_like_calendar_request(text):
+            await self._reply_with_calendar(update, user_id, username, calendar_period)
+            return
+
         # For now, echo the message
         self.audit_logger.log_action(
             user_id=user_id,
@@ -235,6 +266,7 @@ class JarvisCore:
         app.add_handler(CommandHandler("codex", self.handle_codex))
         app.add_handler(CommandHandler("cerca", self.handle_search))
         app.add_handler(CommandHandler("web", self.handle_web))
+        app.add_handler(CommandHandler("calendar", self.handle_calendar))
 
         # Message handler (must be last)
         app.add_handler(
@@ -275,6 +307,128 @@ class JarvisCore:
             )
         except Exception as e:
             logger.error(f"Web server error: {e}")
+
+    async def _reply_with_calendar(
+        self,
+        update: Update,
+        user_id: int,
+        username: str,
+        period: str,
+    ):
+        try:
+            if period == "today":
+                events = await self.calendar_tool.events_for_today()
+                label = "oggi"
+            elif period == "tomorrow":
+                events = await self.calendar_tool.events_for_tomorrow()
+                label = "domani"
+            elif period == "week":
+                events = await self.calendar_tool.events_for_week()
+                label = "i prossimi 7 giorni"
+            else:
+                await update.message.reply_text("Periodo calendario non riconosciuto.")
+                return
+
+            self.audit_logger.log_action(
+                user_id=user_id,
+                username=username,
+                action="tool_calendar",
+                details={"period": period, "event_count": len(events)},
+            )
+            await update.message.reply_text(self._format_calendar_events(events, label))
+        except CalendarError as e:
+            self.audit_logger.log_action(
+                user_id=user_id,
+                username=username,
+                action="tool_calendar",
+                details={"period": period, "status": "error", "error": str(e)},
+            )
+            await update.message.reply_text(f"Errore Calendar: {e}")
+
+    @staticmethod
+    def _detect_calendar_period(text: str) -> str | None:
+        normalized = text.lower()
+
+        if any(word in normalized for word in ("domani", "tomorrow")):
+            return "tomorrow"
+
+        if any(
+            phrase in normalized
+            for phrase in (
+                "settimana",
+                "questa week",
+                "this week",
+                "prossimi 7",
+                "prossimi sette",
+                "week",
+            )
+        ):
+            return "week"
+
+        if any(word in normalized for word in ("oggi", "today")):
+            return "today"
+
+        return None
+
+    @staticmethod
+    def _looks_like_calendar_request(text: str) -> bool:
+        normalized = text.lower()
+        return any(
+            word in normalized
+            for word in (
+                "appuntamenti",
+                "agenda",
+                "calendario",
+                "calendar",
+                "meeting",
+                "riunioni",
+                "eventi",
+            )
+        )
+
+    @staticmethod
+    def _format_calendar_events(events: list[CalendarEvent], label: str) -> str:
+        if not events:
+            return f"Non hai appuntamenti per {label}."
+
+        lines = [f"Appuntamenti per {label}:"]
+        for event in events[:20]:
+            lines.append(f"- {JarvisCore._format_calendar_event(event)}")
+
+        if len(events) > 20:
+            lines.append(f"... altri {len(events) - 20} eventi non mostrati.")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_calendar_event(event: CalendarEvent) -> str:
+        title = event.title or "Untitled"
+        calendar = event.calendar or "Calendar"
+        location = f" @ {event.location}" if event.location else ""
+
+        if event.all_day:
+            return f"Tutto il giorno - {title} ({calendar}){location}"
+
+        start = JarvisCore._format_event_time(event.start)
+        end = JarvisCore._format_event_time(event.end)
+
+        if start and end:
+            return f"{start}-{end} - {title} ({calendar}){location}"
+        if start:
+            return f"{start} - {title} ({calendar}){location}"
+        return f"{title} ({calendar}){location}"
+
+    @staticmethod
+    def _format_event_time(value: str) -> str:
+        if not value:
+            return ""
+
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+
+        return parsed.astimezone().strftime("%H:%M")
 
 
 if __name__ == "__main__":

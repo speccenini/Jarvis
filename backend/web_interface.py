@@ -5,12 +5,15 @@ Local browser-based UI served by FastAPI
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, time as datetime_time, timedelta
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+from calendar_tool import CalendarError, parse_date
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,7 @@ class JarvisWebServer:
         self.start_time = time.time()
         self.browser_tool = None
         self.codex_handler = None
+        self.calendar_tool = None
         self._setup_routes()
 
     def _setup_routes(self):
@@ -95,9 +99,52 @@ class JarvisWebServer:
             return {
                 "backend": "🟢 Running",
                 "telegram": "🟢 Connected",
-                "workspace": "/Users/stef/Documents/Jarvis/data",
+                "workspace": str(Config.JARVIS_WORKSPACE),
                 "uptime": uptime_str,
             }
+
+        @self.app.get("/api/calendar/today")
+        async def api_calendar_today():
+            """Get today's Apple Calendar events."""
+            return await self._calendar_response("today")
+
+        @self.app.get("/api/calendar/tomorrow")
+        async def api_calendar_tomorrow():
+            """Get tomorrow's Apple Calendar events."""
+            return await self._calendar_response("tomorrow")
+
+        @self.app.get("/api/calendar/week")
+        async def api_calendar_week():
+            """Get Apple Calendar events for the next 7 days."""
+            return await self._calendar_response("week")
+
+        @self.app.get("/api/calendar/events")
+        async def api_calendar_events(
+            start: str = Query(..., description="Start date in YYYY-MM-DD format"),
+            end: str = Query(..., description="End date in YYYY-MM-DD format, exclusive"),
+        ):
+            """Get Apple Calendar events between two dates."""
+            try:
+                if not self.calendar_tool:
+                    return {"status": "error", "error": "Calendar tool not available"}
+
+                start_date = parse_date(start, "start")
+                end_date = parse_date(end, "end")
+                start_dt = datetime.combine(start_date, datetime_time.min)
+                end_dt = datetime.combine(end_date, datetime_time.min)
+
+                events = await self.calendar_tool.events_between(start_dt, end_dt)
+                return {
+                    "status": "success",
+                    "range": {
+                        "start": start_dt.isoformat(),
+                        "end": end_dt.isoformat(),
+                    },
+                    "events": [event.to_dict() for event in events],
+                }
+            except CalendarError as e:
+                logger.error(f"Calendar error: {e}")
+                return {"status": "error", "error": str(e)}
 
     def set_browser_tool(self, browser_tool):
         """Set the browser tool instance."""
@@ -107,6 +154,10 @@ class JarvisWebServer:
         """Set the async codex handler."""
         self.codex_handler = handler
 
+    def set_calendar_tool(self, calendar_tool):
+        """Set the calendar tool instance."""
+        self.calendar_tool = calendar_tool
+
     def get_app(self):
         """Get the FastAPI app."""
         return self.app
@@ -114,3 +165,38 @@ class JarvisWebServer:
     def get_url(self) -> str:
         """Get the server URL."""
         return f"http://localhost:{self.port}"
+
+    async def _calendar_response(self, period: str):
+        try:
+            if not self.calendar_tool:
+                return {"status": "error", "error": "Calendar tool not available"}
+
+            if period == "today":
+                events = await self.calendar_tool.events_for_today()
+                start = datetime.combine(datetime.now().date(), datetime_time.min)
+                end = start + timedelta(days=1)
+            elif period == "tomorrow":
+                start = datetime.combine(
+                    datetime.now().date(),
+                    datetime_time.min,
+                ) + timedelta(days=1)
+                end = start + timedelta(days=1)
+                events = await self.calendar_tool.events_for_tomorrow()
+            elif period == "week":
+                start = datetime.combine(datetime.now().date(), datetime_time.min)
+                end = start + timedelta(days=7)
+                events = await self.calendar_tool.events_for_week()
+            else:
+                return {"status": "error", "error": f"Unknown calendar period: {period}"}
+
+            return {
+                "status": "success",
+                "range": {
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                },
+                "events": [event.to_dict() for event in events],
+            }
+        except CalendarError as e:
+            logger.error(f"Calendar error: {e}")
+            return {"status": "error", "error": str(e)}
