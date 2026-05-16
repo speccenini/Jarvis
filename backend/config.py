@@ -26,6 +26,12 @@ class Config:
 
     # Workspace
     JARVIS_WORKSPACE = Path(os.getenv("JARVIS_WORKSPACE", "~/JarvisWorkspace")).expanduser()
+    CODEX_GUIDE_FILE = Path(
+        os.getenv(
+            "CODEX_GUIDE_FILE",
+            JARVIS_WORKSPACE / "documents" / "codex_guidance.md",
+        )
+    ).expanduser()
     FILESYSTEM_ALLOWLIST_FILE = Path(
         os.getenv(
             "FILESYSTEM_ALLOWLIST_FILE",
@@ -35,6 +41,13 @@ class Config:
 
     # Codex
     CODEX_TIMEOUT_SECONDS = int(os.getenv("CODEX_TIMEOUT_SECONDS", "180"))
+
+    # Home / HomeKit
+    HOME_PROVIDER = os.getenv("HOME_PROVIDER", "disabled").lower()
+    HOME_ASSISTANT_URL = os.getenv("HOME_ASSISTANT_URL", "").rstrip("/")
+    HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN", "")
+    HOMEKIT_STATUS_SHORTCUT = os.getenv("HOMEKIT_STATUS_SHORTCUT", "Jarvis Home Status")
+    HOME_TIMEOUT_SECONDS = int(os.getenv("HOME_TIMEOUT_SECONDS", "20"))
 
     # Logging
     LOG_DIR = JARVIS_WORKSPACE / "logs"
@@ -150,6 +163,13 @@ class Config:
         if not cls.JARVIS_WORKSPACE.exists():
             errors.append(f"JARVIS_WORKSPACE does not exist: {cls.JARVIS_WORKSPACE}")
 
+        guide_parent = cls.CODEX_GUIDE_FILE.parent
+        if not guide_parent.exists():
+            try:
+                guide_parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                errors.append(f"Cannot create Codex guide directory {guide_parent}: {e}")
+
         try:
             allowed_roots = cls.allowed_filesystem_roots()
         except ValueError as e:
@@ -175,7 +195,9 @@ class Config:
         - Telegram Whitelist: {cls.TELEGRAM_WHITELIST_FILE}
         - Filesystem Allowlist: {cls.FILESYSTEM_ALLOWLIST_FILE}
         - Allowed Filesystem Roots: {len(cls.allowed_filesystem_roots())}
+        - Codex Guide: {cls.CODEX_GUIDE_FILE}
         - Codex Timeout: {cls.CODEX_TIMEOUT_SECONDS}s
+        - Home Provider: {cls.HOME_PROVIDER}
         - Log Level: {cls.LOG_LEVEL}
         - Log Directory: {cls.LOG_DIR}
         """

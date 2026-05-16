@@ -80,12 +80,7 @@ class AppleCalendarTool:
 
         if process.returncode != 0:
             message = err or f"osascript failed with exit code {process.returncode}"
-            if "not authorized" in message.lower() or "not allowed" in message.lower():
-                message += (
-                    " Grant Terminal or your Python runner access in macOS "
-                    "System Settings > Privacy & Security > Automation/Calendars."
-                )
-            raise CalendarError(message)
+            raise CalendarError(_format_calendar_process_error(message))
 
         try:
             payload = json.loads(out or "[]")
@@ -128,6 +123,31 @@ def parse_date(value: str, field_name: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise CalendarError(f"{field_name} must use YYYY-MM-DD format.") from exc
+
+
+def _format_calendar_process_error(message: str) -> str:
+    """Convert common macOS permission errors into actionable guidance."""
+    normalized = message.lower()
+    permission_markers = (
+        "-1743",
+        "not authorized",
+        "not allowed",
+        "not permitted",
+        "operation not permitted",
+        "not authorised",
+    )
+
+    if any(marker in normalized for marker in permission_markers):
+        return (
+            "macOS sta bloccando l'accesso ad Apple Calendar.\n\n"
+            "Apri System Settings > Privacy & Security e controlla:\n"
+            "- Automation: abilita Terminal/Python per controllare Calendar.\n"
+            "- Calendars: abilita Terminal/Python se presente.\n\n"
+            "Poi riavvia Jarvis con: ./jarvis restart\n\n"
+            f"Dettaglio macOS: {message}"
+        )
+
+    return message
 
 
 def _calendar_jxa_script() -> str:

@@ -6,7 +6,7 @@ Always-running component that handles Telegram messages and routes to tools.
 import logging
 import threading
 from datetime import datetime
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 from config import Config
@@ -16,6 +16,7 @@ from tools_registry import ToolsRegistry
 from codex_bridge import run_codex, CodexError
 from browser_tool import BrowserTool
 from calendar_tool import AppleCalendarTool, CalendarError, CalendarEvent
+from home_tool import HomeError, HomeTool
 from web_interface import JarvisWebServer
 
 # Validate configuration on startup
@@ -43,6 +44,13 @@ class JarvisCore:
         self.tools_registry = tools_registry
         self.browser_tool = BrowserTool()
         self.calendar_tool = AppleCalendarTool(timeout_seconds=Config.TOOL_TIMEOUT_DEFAULT)
+        self.home_tool = HomeTool(
+            provider=Config.HOME_PROVIDER,
+            timeout_seconds=Config.HOME_TIMEOUT_SECONDS,
+            home_assistant_url=Config.HOME_ASSISTANT_URL,
+            home_assistant_token=Config.HOME_ASSISTANT_TOKEN,
+            shortcut_name=Config.HOMEKIT_STATUS_SHORTCUT,
+        )
         self.web_server = JarvisWebServer(port=web_port)
         self.web_server.set_browser_tool(self.browser_tool)
         self.web_server.set_codex_handler(run_codex)
@@ -85,6 +93,38 @@ class JarvisCore:
         )
         await update.message.reply_text("Jarvis backend is running.")
 
+    async def handle_pexhelp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /pexhelp and /pexhelp <tool>."""
+        user_id = update.effective_user.id
+        username = update.effective_user.username or "unknown"
+
+        if not self.authenticator.is_authorized(user_id):
+            self.audit_logger.log_unauthorized_access(user_id, username, "/pexhelp")
+            await update.message.reply_text("Access denied.")
+            return
+
+        text = update.message.text.strip()
+        parts = text.split(maxsplit=1)
+        tool_name = parts[1].strip().lower().lstrip("/") if len(parts) > 1 else ""
+
+        self.audit_logger.log_action(
+            user_id=user_id,
+            username=username,
+            action="pexhelp",
+            details={"tool": tool_name or "all"},
+        )
+        try:
+            await update.message.reply_text(self._format_pexhelp(tool_name)[:4000])
+        except Exception as e:
+            logger.exception("Pexhelp command failed")
+            self.audit_logger.log_action(
+                user_id=user_id,
+                username=username,
+                action="pexhelp",
+                details={"tool": tool_name or "all", "status": "error", "error": str(e)},
+            )
+            await update.message.reply_text(f"Errore pexhelp: {e}")
+
     async def handle_tools_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /tools command to list available tools."""
         user_id = update.effective_user.id
@@ -95,23 +135,13 @@ class JarvisCore:
             await update.message.reply_text("Access denied.")
             return
 
-        tools_text = (
-            "Available tools:\n\n"
-            "• cerca <query> - Search on Google\n"
-            "• codex <prompt> - Query Codex CLI\n"
-            "• calendar oggi|domani|settimana - Read Apple Calendar\n"
-            "• health - Check backend status\n"
-            "• web - Open web interface\n\n"
-            "More tools coming soon!"
-        )
-
         self.audit_logger.log_action(
             user_id=user_id,
             username=username,
             action="list_tools",
             details={},
         )
-        await update.message.reply_text(tools_text)
+        await update.message.reply_text(self._format_tools_list())
 
     async def handle_codex(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /codex command."""
@@ -218,6 +248,98 @@ class JarvisCore:
 
         await self._reply_with_calendar(update, user_id, username, period)
 
+    async def handle_guide(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /guide command to persist Codex working instructions."""
+        user_id = update.effective_user.id
+        username = update.effective_user.username or "unknown"
+
+        if not self.authenticator.is_authorized(user_id):
+            self.audit_logger.log_unauthorized_access(user_id, username, "/guide")
+            await update.message.reply_text("Access denied.")
+            return
+
+        instruction = update.message.text[len("/guide") :].strip()
+
+        if not instruction:
+            await update.message.reply_text(
+                "Uso: /guide <istruzione per Codex>\n"
+                f"File guida: {Config.CODEX_GUIDE_FILE}"
+            )
+            return
+
+        try:
+            guide_file = Config.CODEX_GUIDE_FILE
+            guide_file.parent.mkdir(parents=True, exist_ok=True)
+
+            if not guide_file.exists() or not guide_file.read_text(encoding="utf-8").strip():
+                guide_file.write_text(
+                    "# Codex Working Guide\n\n"
+                    "Istruzioni persistenti per Codex quando lavora sulle cartelle allowlistate.\n\n",
+                    encoding="utf-8",
+                )
+
+            timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+            with open(guide_file, "a", encoding="utf-8") as f:
+                f.write(f"- {timestamp}: {instruction}\n")
+
+            self.audit_logger.log_action(
+                user_id=user_id,
+                username=username,
+                action="guide_update",
+                details={"instruction_length": len(instruction), "guide_file": str(guide_file)},
+            )
+            await update.message.reply_text(f"Guida aggiornata: {guide_file}")
+        except OSError as e:
+            self.audit_logger.log_action(
+                user_id=user_id,
+                username=username,
+                action="guide_update",
+                details={"status": "error", "error": str(e)},
+            )
+            await update.message.reply_text(f"Errore aggiornando la guida: {e}")
+
+    async def handle_home(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /home command."""
+        user_id = update.effective_user.id
+        username = update.effective_user.username or "unknown"
+
+        if not self.authenticator.is_authorized(user_id):
+            self.audit_logger.log_unauthorized_access(user_id, username, "/home")
+            await update.message.reply_text("Access denied.")
+            return
+
+        text = update.message.text.strip().lower()
+        mode = "status"
+        if "devices" in text or "device" in text or "dispositivi" in text or "entita" in text:
+            mode = "devices"
+
+        try:
+            if mode == "devices":
+                result = await self.home_tool.devices()
+            else:
+                result = await self.home_tool.status()
+
+            self.audit_logger.log_action(
+                user_id=user_id,
+                username=username,
+                action="tool_home",
+                details={"mode": mode, "provider": Config.HOME_PROVIDER, "status": "success"},
+            )
+            await update.message.reply_text(result[:4000])
+        except HomeError as e:
+            self.audit_logger.log_action(
+                user_id=user_id,
+                username=username,
+                action="tool_home",
+                details={
+                    "mode": mode,
+                    "provider": Config.HOME_PROVIDER,
+                    "status": "error",
+                    "error": str(e),
+                },
+            )
+            await update.message.reply_text(f"Errore Home: {e}")
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle generic messages."""
         user_id = update.effective_user.id
@@ -257,16 +379,24 @@ class JarvisCore:
 
     def build_telegram_app(self):
         """Build and configure Telegram bot application."""
-        app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).build()
+        app = (
+            ApplicationBuilder()
+            .token(Config.TELEGRAM_BOT_TOKEN)
+            .post_init(self._sync_telegram_command_menu)
+            .build()
+        )
 
         # Command handlers
         app.add_handler(CommandHandler("start", self.handle_start))
+        app.add_handler(CommandHandler("pexhelp", self.handle_pexhelp))
         app.add_handler(CommandHandler("health", self.handle_health))
         app.add_handler(CommandHandler("tools", self.handle_tools_list))
         app.add_handler(CommandHandler("codex", self.handle_codex))
         app.add_handler(CommandHandler("cerca", self.handle_search))
         app.add_handler(CommandHandler("web", self.handle_web))
         app.add_handler(CommandHandler("calendar", self.handle_calendar))
+        app.add_handler(CommandHandler("guide", self.handle_guide))
+        app.add_handler(CommandHandler("home", self.handle_home))
 
         # Message handler (must be last)
         app.add_handler(
@@ -274,6 +404,11 @@ class JarvisCore:
         )
 
         return app
+
+    async def _sync_telegram_command_menu(self, app):
+        """Publish the current slash-command menu to Telegram."""
+        await app.bot.set_my_commands(self._telegram_commands())
+        logger.info("Telegram command menu synchronized")
 
     def run(self):
         """Start the Jarvis backend."""
@@ -307,6 +442,190 @@ class JarvisCore:
             )
         except Exception as e:
             logger.error(f"Web server error: {e}")
+
+    def _format_tools_list(self) -> str:
+        home_status = "configured" if Config.HOME_PROVIDER != "disabled" else "not configured"
+        return "\n".join(
+            [
+                "Available tools:",
+                "",
+                "/start - Initialize Telegram connection",
+                "/pexhelp [tool] - Show help for one tool",
+                "/pexhelp tools - Explain the tool list command",
+                "/health - Check backend status",
+                "/tools - Show this tool list",
+                "/web - Get local web interface URL",
+                "/cerca <query> - Open a Google search on this Mac",
+                "/codex <prompt> - Run Codex CLI with read-only filesystem access",
+                "/guide <instruction> - Add persistent instructions for Codex",
+                "/calendar oggi - Show today's Apple Calendar events",
+                "/calendar domani - Show tomorrow's Apple Calendar events",
+                "/calendar settimana - Show Apple Calendar events for the next 7 days",
+                f"/home status - Read smart-home status ({home_status})",
+                f"/home devices - List smart-home entities ({home_status})",
+                "",
+                "Natural language routes:",
+                "- Calendar: 'Che appuntamenti ho domani?'",
+                "",
+                "Local HTTP API:",
+                "- GET /api/status",
+                "- POST /api/search",
+                "- POST /api/codex",
+                "- GET /api/calendar/today",
+                "- GET /api/calendar/tomorrow",
+                "- GET /api/calendar/week",
+                "- GET /api/calendar/events?start=YYYY-MM-DD&end=YYYY-MM-DD",
+                "",
+                "Use /pexhelp <tool> for details, for example /pexhelp codex.",
+            ]
+        )
+
+    def _telegram_commands(self) -> list[BotCommand]:
+        return [
+            BotCommand("start", "Initialize Telegram connection"),
+            BotCommand("pexhelp", "Show help for one tool"),
+            BotCommand("health", "Check backend status"),
+            BotCommand("tools", "Show available tools"),
+            BotCommand("web", "Get local web interface URL"),
+            BotCommand("cerca", "Open a Google search on this Mac"),
+            BotCommand("codex", "Run Codex CLI"),
+            BotCommand("guide", "Add persistent Codex instructions"),
+            BotCommand("calendar", "Read Apple Calendar"),
+            BotCommand("home", "Read smart-home status"),
+        ]
+
+    def _format_pexhelp(self, tool_name: str = "") -> str:
+        help_items = self._pexhelp_items()
+
+        if not tool_name:
+            tools = ", ".join(f"/{name}" for name in help_items)
+            return (
+                "Uso: /pexhelp <tool>\n\n"
+                f"Tool disponibili: {tools}\n\n"
+                "Esempi:\n"
+                "/pexhelp codex\n"
+                "/pexhelp calendar\n"
+                "/pexhelp home"
+            )
+
+        aliases = {
+            "cerca": "cerca",
+            "search": "cerca",
+            "calendario": "calendar",
+            "agenda": "calendar",
+            "casa": "home",
+            "homekit": "home",
+            "ai": "codex",
+            "pexmag": "codex",
+        }
+        normalized = aliases.get(tool_name, tool_name)
+
+        item = help_items.get(normalized)
+        if not item:
+            return (
+                f"Tool non riconosciuto: {tool_name}\n"
+                "Usa /tools per la lista o /pexhelp senza argomenti."
+            )
+
+        lines = [
+            f"/{normalized}",
+            item["description"],
+            "",
+            "Uso:",
+            *[f"- {usage}" for usage in item["usage"]],
+        ]
+
+        examples = item.get("examples", [])
+        if examples:
+            lines.extend(["", "Esempi:", *[f"- {example}" for example in examples]])
+
+        notes = item.get("notes", [])
+        if notes:
+            lines.extend(["", "Note:", *[f"- {note}" for note in notes]])
+
+        return "\n".join(lines)
+
+    def _pexhelp_items(self) -> dict[str, dict[str, list[str] | str]]:
+        home_status = "configurato" if Config.HOME_PROVIDER != "disabled" else "non configurato"
+        return {
+            "start": {
+                "description": "Inizializza la connessione Telegram con Jarvis.",
+                "usage": ["/start"],
+                "examples": ["/start"],
+            },
+            "pexhelp": {
+                "description": "Mostra istruzioni d'uso generali o per un tool specifico.",
+                "usage": ["/pexhelp", "/pexhelp <tool>"],
+                "examples": ["/pexhelp codex", "/pexhelp calendar", "/pexhelp home"],
+            },
+            "health": {
+                "description": "Controlla se il backend Jarvis e' in esecuzione.",
+                "usage": ["/health"],
+                "examples": ["/health"],
+            },
+            "tools": {
+                "description": "Mostra la lista attuale di comandi e API disponibili.",
+                "usage": ["/tools", "/pexhelp tools"],
+                "examples": ["/tools", "/pexhelp tools"],
+                "notes": [
+                    "La lista include comandi Telegram, route naturali e API HTTP locali.",
+                    "Per i dettagli di un singolo tool usa /pexhelp <tool>, per esempio /pexhelp codex.",
+                ],
+            },
+            "web": {
+                "description": "Restituisce l'URL della web interface locale.",
+                "usage": ["/web"],
+                "examples": ["/web"],
+            },
+            "cerca": {
+                "description": "Apre una ricerca Google nel browser del Mac.",
+                "usage": ["/cerca <query>"],
+                "examples": ["/cerca python fastapi tutorial"],
+                "notes": ["Apre il browser localmente sul Mac dove gira Jarvis."],
+            },
+            "codex": {
+                "description": "Esegue Codex CLI in modalita read-only sulle cartelle allowlistate.",
+                "usage": ["/codex <richiesta>"],
+                "examples": [
+                    "/codex guarda in tasse/2025 e dimmi quali file trovi",
+                    "/codex riassumi i documenti nella cartella casa/2026",
+                ],
+                "notes": [
+                    "Le cartelle accessibili sono definite in backend/filesystem_allowlist.json.",
+                    "Le istruzioni persistenti sono in data/documents/codex_guidance.md.",
+                ],
+            },
+            "guide": {
+                "description": "Aggiunge istruzioni persistenti che Codex riceve a ogni richiesta.",
+                "usage": ["/guide <istruzione>"],
+                "examples": [
+                    "/guide Quando chiedo le tasse, controlla prima Steuererklärung*.pdf"
+                ],
+                "notes": [f"File guida: {Config.CODEX_GUIDE_FILE}"],
+            },
+            "calendar": {
+                "description": "Legge Apple Calendar in sola lettura.",
+                "usage": ["/calendar oggi", "/calendar domani", "/calendar settimana"],
+                "examples": [
+                    "/calendar domani",
+                    "Che appuntamenti ho domani?",
+                    "Che riunioni ho questa settimana?",
+                ],
+                "notes": [
+                    "La prima chiamata puo' richiedere permessi macOS per Calendar/Automation."
+                ],
+            },
+            "home": {
+                "description": "Interroga lo stato smart-home in sola lettura.",
+                "usage": ["/home status", "/home devices"],
+                "examples": ["/home status", "/home devices"],
+                "notes": [
+                    f"Provider Home: {home_status}.",
+                    "Configura HOME_PROVIDER=shortcut oppure HOME_PROVIDER=homeassistant in backend/.env.",
+                    "Non sono implementati comandi per accendere o spegnere dispositivi.",
+                ],
+            },
+        }
 
     async def _reply_with_calendar(
         self,

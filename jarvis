@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+RUN_DIR="$ROOT_DIR/data/run"
+LOG_DIR="$ROOT_DIR/data/logs"
+PID_FILE="$RUN_DIR/jarvis.pid"
+LOG_FILE="$LOG_DIR/jarvis_backend.out"
+PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  PYTHON_BIN="python3"
+fi
+
+mkdir -p "$RUN_DIR" "$LOG_DIR"
+
+usage() {
+  cat <<EOF
+Usage: ./jarvis {start|stop|restart|status|logs|calendar-auth}
+
+Commands:
+  start          Start Jarvis backend in background
+  stop           Stop Jarvis backend
+  restart        Stop and start Jarvis backend
+  status         Show whether Jarvis is running
+  logs           Follow backend logs
+  calendar-auth  Request macOS Calendar automation permission
+EOF
+}
+
+jarvis_pids() {
+  ps -axo pid=,command= \
+    | awk '
+        $0 ~ "run_backend.py" && $0 !~ "awk" {print $1}
+      '
+}
+
+pid_is_running() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+status() {
+  local pids
+  pids="$(jarvis_pids | xargs || true)"
+
+  if [[ -n "$pids" ]]; then
+    echo "Jarvis is running."
+    echo "PID(s): $pids"
+    echo "Log: $LOG_FILE"
+    return 0
+  fi
+
+  if [[ -f "$PID_FILE" ]]; then
+    echo "Jarvis is stopped. Removing stale PID file: $PID_FILE"
+    rm -f "$PID_FILE"
+  else
+    echo "Jarvis is stopped."
+  fi
+}
+
+start() {
+  local pids
+  pids="$(jarvis_pids | xargs || true)"
+
+  if [[ -n "$pids" ]]; then
+    echo "Jarvis is already running."
+    echo "PID(s): $pids"
+    echo "$pids" | awk '{print $1}' > "$PID_FILE"
+    return 0
+  fi
+
+  cd "$BACKEND_DIR"
+  nohup "$PYTHON_BIN" run_backend.py >> "$LOG_FILE" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$PID_FILE"
+
+  sleep 1
+  if pid_is_running "$pid"; then
+    echo "Jarvis started."
+    echo "PID: $pid"
+    echo "Log: $LOG_FILE"
+  else
+    echo "Jarvis failed to start. Check log: $LOG_FILE" >&2
+    rm -f "$PID_FILE"
+    return 1
+  fi
+}
+
+stop() {
+  local pids
+  pids="$(jarvis_pids | xargs || true)"
+
+  if [[ -z "$pids" ]]; then
+    rm -f "$PID_FILE"
+    echo "Jarvis is not running."
+    return 0
+  fi
+
+  echo "Stopping Jarvis PID(s): $pids"
+  kill $pids 2>/dev/null || true
+
+  for _ in {1..20}; do
+    if [[ -z "$(jarvis_pids | xargs || true)" ]]; then
+      rm -f "$PID_FILE"
+      echo "Jarvis stopped."
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "Jarvis did not stop after 10 seconds." >&2
+  return 1
+}
+
+calendar_auth() {
+  echo "Requesting Apple Calendar permission through osascript..."
+  echo "If macOS shows a prompt, allow Terminal/Python to control Calendar."
+
+  if osascript -e 'tell application "Calendar" to count calendars' >/dev/null; then
+    echo "Calendar permission OK."
+    echo "Restart Jarvis with: ./jarvis restart"
+    return 0
+  fi
+
+  cat <<EOF
+Calendar is still blocked by macOS.
+
+Open System Settings > Privacy & Security and check:
+- Automation: allow Terminal/Python/osascript to control Calendar.
+- Calendars: allow Terminal/Python/osascript if present.
+
+After granting permission, run:
+  ./jarvis restart
+EOF
+
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation" 2>/dev/null || true
+  return 1
+}
+
+case "${1:-}" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    stop
+    start
+    ;;
+  status)
+    status
+    ;;
+  logs)
+    touch "$LOG_FILE"
+    tail -f "$LOG_FILE"
+    ;;
+  calendar-auth)
+    calendar_auth
+    ;;
+  -h|--help|help|"")
+    usage
+    ;;
+  *)
+    echo "Unknown command: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

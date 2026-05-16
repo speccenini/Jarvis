@@ -406,7 +406,7 @@ Implement commands progressively.
 
 ```text
 /start
-/help
+/pexhelp
 /status
 /ask <question>
 /codex <task>
@@ -508,7 +508,7 @@ Jarvis is reachable from Telegram and answers basic commands.
 
 1. Implement Telegram bot with long polling.
 2. Restrict access to allowed Telegram user IDs.
-3. Implement `/start`, `/help`, `/status`.
+3. Implement `/start`, `/pexhelp`, `/status`.
 4. Implement `/ask <message>` with a simple LLM response.
 5. Add basic error handling.
 6. Add audit logging for every message.
@@ -909,7 +909,7 @@ Create the Python project skeleton for Jarvis according to jarvis_ai_assistant_i
 ### Prompt 2 — Telegram MVP
 
 ```text
-Implement Phase 1 from jarvis_ai_assistant_implementation_plan.md. Add Telegram long polling, allowed-user authorization, /start, /help, /status, and /ask. Keep the LLM service behind an interface so it can be replaced later. Add tests for authorization and command routing.
+Implement Phase 1 from jarvis_ai_assistant_implementation_plan.md. Add Telegram long polling, allowed-user authorization, /start, /pexhelp, /status, and /ask. Keep the LLM service behind an interface so it can be replaced later. Add tests for authorization and command routing.
 ```
 
 ### Prompt 3 — Codex tool
@@ -1069,4 +1069,3 @@ Jarvis v0.1
 ```
 
 After v0.1, add documents and make it useful as a personal assistant.
-

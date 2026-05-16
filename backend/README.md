@@ -36,6 +36,21 @@ JARVIS_WORKSPACE=/Users/stef/Documents/Jarvis
 CODEX_TIMEOUT_SECONDS=120
 ```
 
+Optional Home/HomeKit integration:
+
+```env
+# disabled | shortcut | homeassistant
+HOME_PROVIDER=disabled
+
+# For HOME_PROVIDER=shortcut
+HOMEKIT_STATUS_SHORTCUT=Jarvis Home Status
+
+# For HOME_PROVIDER=homeassistant
+HOME_ASSISTANT_URL=http://homeassistant.local:8123
+HOME_ASSISTANT_TOKEN=your_long_lived_access_token
+HOME_TIMEOUT_SECONDS=20
+```
+
 Telegram access is controlled by `backend/telegram_whitelist.json`:
 
 ```json
@@ -69,7 +84,23 @@ The real filesystem allowlist is local-only and ignored by Git. A template is
 tracked as `backend/filesystem_allowlist.example.json`. If the file is missing,
 Jarvis falls back to `JARVIS_WORKSPACE` only.
 
-### 3. Run the backend
+### 3. Manage the backend service
+
+From the repository root:
+
+```bash
+./jarvis start
+./jarvis stop
+./jarvis restart
+./jarvis status
+./jarvis logs
+./jarvis calendar-auth
+```
+
+The script starts `backend/run_backend.py` in the background, stores the PID in
+`data/run/jarvis.pid`, and writes output to `data/logs/jarvis_backend.out`.
+
+### 4. Run the backend manually
 
 ```bash
 python run_backend.py
@@ -89,11 +120,16 @@ Once running, you can send these commands via Telegram:
 
 - `/start` - Initialize connection
 - `/health` - Check if backend is running
+- `/pexhelp` - Show available help topics
+- `/pexhelp <tool>` - Show usage for one tool, for example `/pexhelp tools`
 - `/tools` - List available tools
 - `/codex <prompt>` - Run a Codex query
+- `/guide <instruction>` - Add persistent working guidance for Codex
 - `/calendar oggi` - List today's Apple Calendar events
 - `/calendar domani` - List tomorrow's Apple Calendar events
 - `/calendar settimana` - List Apple Calendar events for the next 7 days
+- `/home status` - Read smart-home status
+- `/home devices` - List Home Assistant entities/devices
 - Any text message - Echo response (more tools coming soon)
 
 You can also ask naturally in Telegram:
@@ -102,6 +138,14 @@ You can also ask naturally in Telegram:
 Che appuntamenti ho domani?
 Che riunioni ho questa settimana?
 Mostrami la mia agenda oggi.
+```
+
+Codex guidance is stored locally in `data/documents/codex_guidance.md` and is
+included in every `/codex` request. Use it for folder-specific habits, for
+example:
+
+```text
+/guide Quando chiedo quanto ho pagato di tasse, esamina sempre Steuererklärung*.pdf nella cartella tasse dell'anno richiesto.
 ```
 
 ## Local HTTP API
@@ -120,6 +164,38 @@ curl "http://localhost:8000/api/calendar/events?start=2026-05-13&end=2026-05-14"
 The first Calendar request may trigger a macOS privacy permission prompt for
 Terminal or the Python runner. Grant Calendar/Automation access in System
 Settings if macOS blocks the request.
+
+If Telegram shows Calendar error `-1743`, macOS denied Apple Events access.
+Open System Settings > Privacy & Security and check:
+
+- Automation: allow Terminal/Python to control Calendar.
+- Calendars: allow Terminal/Python if it appears there.
+
+Then restart Jarvis:
+
+```bash
+./jarvis calendar-auth
+./jarvis restart
+```
+
+## Home / HomeKit
+
+Direct HomeKit access from Python is limited. Jarvis supports two read-only
+providers:
+
+- `HOME_PROVIDER=shortcut`: runs a macOS Shortcut, default name
+  `Jarvis Home Status`, and returns the shortcut output to Telegram.
+- `HOME_PROVIDER=homeassistant`: calls Home Assistant REST API using
+  `HOME_ASSISTANT_URL` and `HOME_ASSISTANT_TOKEN`.
+
+Supported Telegram commands:
+
+```text
+/home status
+/home devices
+```
+
+No device-control actions are implemented yet.
 
 ## Core Components
 
