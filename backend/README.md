@@ -110,6 +110,7 @@ From the repository root:
 ./jarvis status
 ./jarvis logs
 ./jarvis calendar-auth
+./jarvis calendar-diagnose
 ```
 
 The script starts `backend/run_backend.py` in the background, stores the PID in
@@ -200,6 +201,25 @@ curl "http://localhost:8000/api/calendar/events?start=2026-05-13&end=2026-05-14"
 The first Calendar request may trigger a macOS privacy permission prompt for
 Terminal or the Python runner. Grant Calendar/Automation access in System
 Settings if macOS blocks the request.
+
+Standalone Calendar diagnostics:
+
+```bash
+./jarvis calendar-diagnose --timeout 20 --per-calendar-timeout 5 --concurrency 3 --days 7
+```
+
+Calendar tuning options:
+
+```env
+CALENDAR_TIMEOUT_SECONDS=20
+CALENDAR_PER_CALENDAR_TIMEOUT_SECONDS=5
+CALENDAR_QUERY_CONCURRENCY=3
+CALENDAR_INCLUDED_NAMES=
+CALENDAR_EXCLUDED_NAMES=
+```
+
+Use `CALENDAR_INCLUDED_NAMES` as a comma-separated list if some local calendars
+are too slow and you only want Jarvis to query selected calendars.
 
 If Telegram shows Calendar error `-1743`, macOS denied Apple Events access.
 Open System Settings > Privacy & Security and check:

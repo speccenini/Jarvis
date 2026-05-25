@@ -84,6 +84,20 @@ class Config:
     # Tool defaults
     TOOL_TIMEOUT_DEFAULT = 30  # seconds
     CALENDAR_TIMEOUT_SECONDS = int(os.getenv("CALENDAR_TIMEOUT_SECONDS", "20"))
+    CALENDAR_PER_CALENDAR_TIMEOUT_SECONDS = int(
+        os.getenv("CALENDAR_PER_CALENDAR_TIMEOUT_SECONDS", "5")
+    )
+    CALENDAR_QUERY_CONCURRENCY = int(os.getenv("CALENDAR_QUERY_CONCURRENCY", "3"))
+    CALENDAR_INCLUDED_NAMES = [
+        name.strip()
+        for name in os.getenv("CALENDAR_INCLUDED_NAMES", "").split(",")
+        if name.strip()
+    ]
+    CALENDAR_EXCLUDED_NAMES = [
+        name.strip()
+        for name in os.getenv("CALENDAR_EXCLUDED_NAMES", "").split(",")
+        if name.strip()
+    ]
     TOOL_MAX_OUTPUT_LENGTH = 4000  # characters
 
     @classmethod

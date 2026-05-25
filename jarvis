@@ -17,7 +17,7 @@ mkdir -p "$RUN_DIR" "$LOG_DIR"
 
 usage() {
   cat <<EOF
-Usage: ./jarvis {start|stop|restart|status|logs|calendar-auth}
+Usage: ./jarvis {start|stop|restart|status|logs|calendar-auth|calendar-diagnose}
 
 Commands:
   start          Start Jarvis backend in background
@@ -25,7 +25,8 @@ Commands:
   restart        Stop and start Jarvis backend
   status         Show whether Jarvis is running
   logs           Follow backend logs
-  calendar-auth  Request macOS Calendar automation permission
+  calendar-auth      Request macOS Calendar automation permission
+  calendar-diagnose  Run standalone Calendar diagnostics
 EOF
 }
 
@@ -160,6 +161,10 @@ case "${1:-}" in
     ;;
   calendar-auth)
     calendar_auth
+    ;;
+  calendar-diagnose)
+    cd "$BACKEND_DIR"
+    "$PYTHON_BIN" scripts/diagnose_calendar.py "${@:2}"
     ;;
   -h|--help|help|"")
     usage

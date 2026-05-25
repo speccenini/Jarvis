@@ -44,7 +44,13 @@ class JarvisCore:
         self.authenticator = authenticator
         self.tools_registry = tools_registry
         self.browser_tool = BrowserTool()
-        self.calendar_tool = AppleCalendarTool(timeout_seconds=Config.CALENDAR_TIMEOUT_SECONDS)
+        self.calendar_tool = AppleCalendarTool(
+            timeout_seconds=Config.CALENDAR_TIMEOUT_SECONDS,
+            per_calendar_timeout_seconds=Config.CALENDAR_PER_CALENDAR_TIMEOUT_SECONDS,
+            query_concurrency=Config.CALENDAR_QUERY_CONCURRENCY,
+            included_calendar_names=Config.CALENDAR_INCLUDED_NAMES,
+            excluded_calendar_names=Config.CALENDAR_EXCLUDED_NAMES,
+        )
         self.document_service = DocumentService()
         self.home_tool = HomeTool(
             provider=Config.HOME_PROVIDER,
