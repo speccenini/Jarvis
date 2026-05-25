@@ -17,6 +17,7 @@ from codex_bridge import run_codex, CodexError
 from browser_tool import BrowserTool
 from calendar_tool import AppleCalendarTool, CalendarError, CalendarEvent
 from home_tool import HomeError, HomeTool
+from services.document_service import DocumentService, DocumentServiceError
 from web_interface import JarvisWebServer
 
 # Validate configuration on startup
@@ -43,7 +44,8 @@ class JarvisCore:
         self.authenticator = authenticator
         self.tools_registry = tools_registry
         self.browser_tool = BrowserTool()
-        self.calendar_tool = AppleCalendarTool(timeout_seconds=Config.TOOL_TIMEOUT_DEFAULT)
+        self.calendar_tool = AppleCalendarTool(timeout_seconds=Config.CALENDAR_TIMEOUT_SECONDS)
+        self.document_service = DocumentService()
         self.home_tool = HomeTool(
             provider=Config.HOME_PROVIDER,
             timeout_seconds=Config.HOME_TIMEOUT_SECONDS,
@@ -55,6 +57,7 @@ class JarvisCore:
         self.web_server.set_browser_tool(self.browser_tool)
         self.web_server.set_codex_handler(run_codex)
         self.web_server.set_calendar_tool(self.calendar_tool)
+        self.web_server.set_document_service(self.document_service)
         logger.info("Jarvis Core initialized")
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -340,6 +343,58 @@ class JarvisCore:
             )
             await update.message.reply_text(f"Errore Home: {e}")
 
+    async def handle_docs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /docs document RAG commands."""
+        user_id = update.effective_user.id
+        username = update.effective_user.username or "unknown"
+
+        if not self.authenticator.is_authorized(user_id):
+            self.audit_logger.log_unauthorized_access(user_id, username, "/docs")
+            await update.message.reply_text("Access denied.")
+            return
+
+        argument = update.message.text[len("/docs") :].strip()
+        if not argument:
+            await update.message.reply_text(
+                "Uso: /docs index, /docs status, /docs search <query>, oppure /docs <domanda>."
+            )
+            return
+
+        command, _, rest = argument.partition(" ")
+        command = command.lower()
+
+        try:
+            if command == "index":
+                status_message = await update.message.reply_text("Indicizzo i PDF locali...")
+                indexed = self.document_service.index_all()
+                stats = self.document_service.stats()
+                self.audit_logger.log_action(
+                    user_id=user_id,
+                    username=username,
+                    action="docs_index",
+                    details={"files": len(indexed), "chunks": stats.get("chunks", 0)},
+                )
+                await status_message.edit_text(self._format_docs_index_result(indexed, stats))
+                return
+
+            if command == "status":
+                stats = self.document_service.stats()
+                await update.message.reply_text(self._format_docs_status(stats))
+                return
+
+            if command == "search":
+                query = rest.strip()
+                if not query:
+                    await update.message.reply_text("Uso: /docs search <query>")
+                    return
+                result = self.document_service.search(query)
+                await update.message.reply_text(result[:4000])
+                return
+
+            await self._reply_with_documents(update, user_id, username, argument)
+        except (DocumentServiceError, OSError, ValueError) as e:
+            await update.message.reply_text(f"Errore documenti: {e}")
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle generic messages."""
         user_id = update.effective_user.id
@@ -368,7 +423,14 @@ class JarvisCore:
             await self._reply_with_calendar(update, user_id, username, calendar_period)
             return
 
-        # For now, echo the message
+        if self._looks_like_document_request(text):
+            try:
+                await self._reply_with_documents(update, user_id, username, text)
+            except (DocumentServiceError, OSError, ValueError) as e:
+                await update.message.reply_text(f"Errore documenti: {e}")
+            return
+
+        # Fallback when no natural route matches.
         self.audit_logger.log_action(
             user_id=user_id,
             username=username,
@@ -397,6 +459,7 @@ class JarvisCore:
         app.add_handler(CommandHandler("calendar", self.handle_calendar))
         app.add_handler(CommandHandler("guide", self.handle_guide))
         app.add_handler(CommandHandler("home", self.handle_home))
+        app.add_handler(CommandHandler("docs", self.handle_docs))
 
         # Message handler (must be last)
         app.add_handler(
@@ -458,6 +521,9 @@ class JarvisCore:
                 "/cerca <query> - Open a Google search on this Mac",
                 "/codex <prompt> - Run Codex CLI with read-only filesystem access",
                 "/guide <instruction> - Add persistent instructions for Codex",
+                "/docs index - Index local PDF documents",
+                "/docs search <query> - Search indexed documents",
+                "/docs <question> - Answer using indexed documents",
                 "/calendar oggi - Show today's Apple Calendar events",
                 "/calendar domani - Show tomorrow's Apple Calendar events",
                 "/calendar settimana - Show Apple Calendar events for the next 7 days",
@@ -466,6 +532,7 @@ class JarvisCore:
                 "",
                 "Natural language routes:",
                 "- Calendar: 'Che appuntamenti ho domani?'",
+                "- Documents: 'Quanto ho pagato di tasse nel 2024?'",
                 "",
                 "Local HTTP API:",
                 "- GET /api/status",
@@ -490,6 +557,7 @@ class JarvisCore:
             BotCommand("cerca", "Open a Google search on this Mac"),
             BotCommand("codex", "Run Codex CLI"),
             BotCommand("guide", "Add persistent Codex instructions"),
+            BotCommand("docs", "Search local PDF documents"),
             BotCommand("calendar", "Read Apple Calendar"),
             BotCommand("home", "Read smart-home status"),
         ]
@@ -603,6 +671,25 @@ class JarvisCore:
                 ],
                 "notes": [f"File guida: {Config.CODEX_GUIDE_FILE}"],
             },
+            "docs": {
+                "description": "Indicizza e interroga i PDF locali con retrieval ibrido.",
+                "usage": [
+                    "/docs index",
+                    "/docs status",
+                    "/docs search <query>",
+                    "/docs <domanda sui documenti>",
+                ],
+                "examples": [
+                    "/docs index",
+                    "/docs search tasse 2025",
+                    "/docs Quanto ho pagato di tasse nel 2025?",
+                ],
+                "notes": [
+                    f"Cartella PDF: {Config.DOCUMENTS_PDF_DIR}",
+                    f"Indice SQLite: {Config.DOCUMENTS_METADATA_DB}",
+                    "Le domande su tasse/documenti/PDF vengono instradate automaticamente anche senza /docs.",
+                ],
+            },
             "calendar": {
                 "description": "Legge Apple Calendar in sola lettura.",
                 "usage": ["/calendar oggi", "/calendar domani", "/calendar settimana"],
@@ -634,6 +721,8 @@ class JarvisCore:
         username: str,
         period: str,
     ):
+        status_message = await update.message.reply_text("Leggo Apple Calendar...")
+
         try:
             if period == "today":
                 events = await self.calendar_tool.events_for_today()
@@ -654,7 +743,7 @@ class JarvisCore:
                 action="tool_calendar",
                 details={"period": period, "event_count": len(events)},
             )
-            await update.message.reply_text(self._format_calendar_events(events, label))
+            await status_message.edit_text(self._format_calendar_events(events, label))
         except CalendarError as e:
             self.audit_logger.log_action(
                 user_id=user_id,
@@ -662,7 +751,24 @@ class JarvisCore:
                 action="tool_calendar",
                 details={"period": period, "status": "error", "error": str(e)},
             )
-            await update.message.reply_text(f"Errore Calendar: {e}")
+            await status_message.edit_text(f"Errore Calendar: {e}")
+
+    async def _reply_with_documents(
+        self,
+        update: Update,
+        user_id: int,
+        username: str,
+        question: str,
+    ):
+        status_message = await update.message.reply_text("Cerco nei documenti locali...")
+        answer = await self.document_service.answer(question)
+        self.audit_logger.log_action(
+            user_id=user_id,
+            username=username,
+            action="docs_answer",
+            details={"question_length": len(question), "source_count": answer.source_count},
+        )
+        await status_message.edit_text(answer.answer[:4000])
 
     @staticmethod
     def _detect_calendar_period(text: str) -> str | None:
@@ -706,6 +812,30 @@ class JarvisCore:
         )
 
     @staticmethod
+    def _looks_like_document_request(text: str) -> bool:
+        normalized = text.lower()
+        return any(
+            word in normalized
+            for word in (
+                "tasse",
+                "tax",
+                "imposte",
+                "steuer",
+                "steuererklärung",
+                "dichiarazione",
+                "pagato",
+                "pagata",
+                "documento",
+                "documenti",
+                "pdf",
+                "fattura",
+                "fatture",
+                "ricevuta",
+                "ricevute",
+            )
+        )
+
+    @staticmethod
     def _format_calendar_events(events: list[CalendarEvent], label: str) -> str:
         if not events:
             return f"Non hai appuntamenti per {label}."
@@ -717,6 +847,45 @@ class JarvisCore:
         if len(events) > 20:
             lines.append(f"... altri {len(events) - 20} eventi non mostrati.")
 
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_docs_status(stats: dict[str, object]) -> str:
+        return "\n".join(
+            [
+                "Document index:",
+                f"- files: {stats.get('files', 0)}",
+                f"- chunks: {stats.get('chunks', 0)}",
+                f"- embedding: {stats.get('embedding_provider', 'unknown')}",
+                f"- chroma: {stats.get('chroma_enabled', False)}",
+                f"- db: {stats.get('db_path', Config.DOCUMENTS_METADATA_DB)}",
+                f"- pdf dir: {Config.DOCUMENTS_PDF_DIR}",
+            ]
+        )
+
+    @staticmethod
+    def _format_docs_index_result(indexed, stats: dict[str, object]) -> str:
+        lines = ["Indicizzazione completata."]
+        if not indexed:
+            lines.append(f"Nessun PDF trovato in {Config.DOCUMENTS_PDF_DIR}")
+        else:
+            for item in indexed[:20]:
+                year = item.year or "unknown"
+                lines.append(
+                    f"- {item.filename}: {item.pages} pagine, {item.chunks} chunk, anno={year}"
+                )
+            if len(indexed) > 20:
+                lines.append(f"... altri {len(indexed) - 20} PDF non mostrati.")
+
+        lines.extend(
+            [
+                "",
+                f"Totale file: {stats.get('files', 0)}",
+                f"Totale chunk: {stats.get('chunks', 0)}",
+                f"Embedding: {stats.get('embedding_provider', 'unknown')}",
+                f"Chroma: {stats.get('chroma_enabled', False)}",
+            ]
+        )
         return "\n".join(lines)
 
     @staticmethod

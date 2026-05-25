@@ -51,6 +51,21 @@ HOME_ASSISTANT_TOKEN=your_long_lived_access_token
 HOME_TIMEOUT_SECONDS=20
 ```
 
+Optional document RAG configuration:
+
+```env
+DOCUMENTS_PDF_DIR=/Users/stef/Documents/Jarvis/data/documents/pdf
+DOCUMENTS_TEXT_DIR=/Users/stef/Documents/Jarvis/data/documents/text
+DOCUMENTS_CHROMA_DIR=/Users/stef/Documents/Jarvis/data/documents/chroma
+DOCUMENTS_METADATA_DB=/Users/stef/Documents/Jarvis/data/documents/metadata.sqlite
+DOCUMENTS_TOP_K=6
+
+# auto uses OpenAI embeddings if OPENAI_API_KEY exists, otherwise local hashing
+EMBEDDING_PROVIDER=auto
+OPENAI_API_KEY=
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+```
+
 Telegram access is controlled by `backend/telegram_whitelist.json`:
 
 ```json
@@ -125,6 +140,10 @@ Once running, you can send these commands via Telegram:
 - `/tools` - List available tools
 - `/codex <prompt>` - Run a Codex query
 - `/guide <instruction>` - Add persistent working guidance for Codex
+- `/docs index` - Index local PDF documents
+- `/docs status` - Show document index status
+- `/docs search <query>` - Search indexed document chunks
+- `/docs <question>` - Answer a question using indexed document chunks
 - `/calendar oggi` - List today's Apple Calendar events
 - `/calendar domani` - List tomorrow's Apple Calendar events
 - `/calendar settimana` - List Apple Calendar events for the next 7 days
@@ -151,6 +170,23 @@ example:
 ## Local HTTP API
 
 The web server exposes local-only API endpoints on `http://localhost:8000`.
+
+Document RAG endpoints:
+
+```bash
+curl http://localhost:8000/api/documents/status
+curl -X POST http://localhost:8000/api/documents/index
+curl -X POST http://localhost:8000/api/documents/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"tasse 2025"}'
+```
+
+Command-line document indexing and search:
+
+```bash
+python backend/scripts/index_documents.py
+python backend/scripts/query_documents.py "tasse 2025"
+```
 
 Apple Calendar access is read-only:
 

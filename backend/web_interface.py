@@ -36,6 +36,7 @@ class JarvisWebServer:
         self.browser_tool = None
         self.codex_handler = None
         self.calendar_tool = None
+        self.document_service = None
         self._setup_routes()
 
     def _setup_routes(self):
@@ -146,6 +147,43 @@ class JarvisWebServer:
                 logger.error(f"Calendar error: {e}")
                 return {"status": "error", "error": str(e)}
 
+        @self.app.get("/api/documents/status")
+        async def api_documents_status():
+            """Get local document index status."""
+            if not self.document_service:
+                return {"status": "error", "error": "Document service not available"}
+            return {"status": "success", "index": self.document_service.stats()}
+
+        @self.app.post("/api/documents/index")
+        async def api_documents_index():
+            """Index local PDF documents."""
+            try:
+                if not self.document_service:
+                    return {"status": "error", "error": "Document service not available"}
+                indexed = self.document_service.index_all()
+                return {
+                    "status": "success",
+                    "indexed": [item.__dict__ for item in indexed],
+                    "index": self.document_service.stats(),
+                }
+            except Exception as e:
+                logger.error(f"Document index error: {e}")
+                return {"status": "error", "error": str(e)}
+
+        @self.app.post("/api/documents/search")
+        async def api_documents_search(request: SearchRequest):
+            """Search local indexed documents."""
+            try:
+                if not self.document_service:
+                    return {"status": "error", "error": "Document service not available"}
+                return {
+                    "status": "success",
+                    "result": self.document_service.search(request.query),
+                }
+            except Exception as e:
+                logger.error(f"Document search error: {e}")
+                return {"status": "error", "error": str(e)}
+
     def set_browser_tool(self, browser_tool):
         """Set the browser tool instance."""
         self.browser_tool = browser_tool
@@ -157,6 +195,10 @@ class JarvisWebServer:
     def set_calendar_tool(self, calendar_tool):
         """Set the calendar tool instance."""
         self.calendar_tool = calendar_tool
+
+    def set_document_service(self, document_service):
+        """Set the document service instance."""
+        self.document_service = document_service
 
     def get_app(self):
         """Get the FastAPI app."""

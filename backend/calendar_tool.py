@@ -73,7 +73,15 @@ class AppleCalendarTool:
             raise CalendarError("osascript is not available on this system.") from exc
         except asyncio.TimeoutError as exc:
             process.kill()
-            raise CalendarError("Apple Calendar query timed out.") from exc
+            try:
+                await process.wait()
+            except Exception:
+                logger.debug("Timed-out Calendar process did not exit cleanly", exc_info=True)
+            raise CalendarError(
+                "Apple Calendar non ha risposto in tempo. "
+                "Apri Calendar sul Mac, controlla i permessi in Privacy & Security "
+                "e poi esegui: ./jarvis calendar-auth"
+            ) from exc
 
         out = stdout.decode("utf-8", errors="replace").strip()
         err = stderr.decode("utf-8", errors="replace").strip()

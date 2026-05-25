@@ -42,6 +42,34 @@ class Config:
     # Codex
     CODEX_TIMEOUT_SECONDS = int(os.getenv("CODEX_TIMEOUT_SECONDS", "180"))
 
+    # Documents / local RAG
+    DOCUMENTS_PDF_DIR = Path(
+        os.getenv("DOCUMENTS_PDF_DIR", JARVIS_WORKSPACE / "documents" / "pdf")
+    ).expanduser()
+    DOCUMENTS_TEXT_DIR = Path(
+        os.getenv("DOCUMENTS_TEXT_DIR", JARVIS_WORKSPACE / "documents" / "text")
+    ).expanduser()
+    DOCUMENTS_CHROMA_DIR = Path(
+        os.getenv("DOCUMENTS_CHROMA_DIR", JARVIS_WORKSPACE / "documents" / "chroma")
+    ).expanduser()
+    DOCUMENTS_METADATA_DB = Path(
+        os.getenv(
+            "DOCUMENTS_METADATA_DB",
+            JARVIS_WORKSPACE / "documents" / "metadata.sqlite",
+        )
+    ).expanduser()
+    DOCUMENTS_CHUNK_SIZE = int(os.getenv("DOCUMENTS_CHUNK_SIZE", "900"))
+    DOCUMENTS_CHUNK_OVERLAP = int(os.getenv("DOCUMENTS_CHUNK_OVERLAP", "150"))
+    DOCUMENTS_TOP_K = int(os.getenv("DOCUMENTS_TOP_K", "6"))
+    DOCUMENTS_USE_CHROMA = os.getenv("DOCUMENTS_USE_CHROMA", "1").lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+    EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "auto").lower()
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+
     # Home / HomeKit
     HOME_PROVIDER = os.getenv("HOME_PROVIDER", "disabled").lower()
     HOME_ASSISTANT_URL = os.getenv("HOME_ASSISTANT_URL", "").rstrip("/")
@@ -55,6 +83,7 @@ class Config:
 
     # Tool defaults
     TOOL_TIMEOUT_DEFAULT = 30  # seconds
+    CALENDAR_TIMEOUT_SECONDS = int(os.getenv("CALENDAR_TIMEOUT_SECONDS", "20"))
     TOOL_MAX_OUTPUT_LENGTH = 4000  # characters
 
     @classmethod
@@ -170,6 +199,26 @@ class Config:
             except OSError as e:
                 errors.append(f"Cannot create Codex guide directory {guide_parent}: {e}")
 
+        for directory in (
+            cls.DOCUMENTS_PDF_DIR,
+            cls.DOCUMENTS_TEXT_DIR,
+            cls.DOCUMENTS_CHROMA_DIR,
+            cls.DOCUMENTS_METADATA_DB.parent,
+        ):
+            try:
+                directory.resolve().relative_to(cls.JARVIS_WORKSPACE.resolve())
+            except ValueError:
+                errors.append(
+                    "Document paths must stay under JARVIS_WORKSPACE: "
+                    f"{directory} is outside {cls.JARVIS_WORKSPACE}"
+                )
+                continue
+
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                errors.append(f"Cannot create document directory {directory}: {e}")
+
         try:
             allowed_roots = cls.allowed_filesystem_roots()
         except ValueError as e:
@@ -197,6 +246,10 @@ class Config:
         - Allowed Filesystem Roots: {len(cls.allowed_filesystem_roots())}
         - Codex Guide: {cls.CODEX_GUIDE_FILE}
         - Codex Timeout: {cls.CODEX_TIMEOUT_SECONDS}s
+        - Documents PDF Directory: {cls.DOCUMENTS_PDF_DIR}
+        - Documents Metadata DB: {cls.DOCUMENTS_METADATA_DB}
+        - Embedding Provider: {cls.EMBEDDING_PROVIDER}
+        - Calendar Timeout: {cls.CALENDAR_TIMEOUT_SECONDS}s
         - Home Provider: {cls.HOME_PROVIDER}
         - Log Level: {cls.LOG_LEVEL}
         - Log Directory: {cls.LOG_DIR}

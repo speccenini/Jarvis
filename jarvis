@@ -118,7 +118,8 @@ calendar_auth() {
   echo "Requesting Apple Calendar permission through osascript..."
   echo "If macOS shows a prompt, allow Terminal/Python to control Calendar."
 
-  if osascript -e 'tell application "Calendar" to count calendars' >/dev/null; then
+  cd "$BACKEND_DIR"
+  if "$PYTHON_BIN" calendar_auth_check.py; then
     echo "Calendar permission OK."
     echo "Restart Jarvis with: ./jarvis restart"
     return 0

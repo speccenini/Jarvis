@@ -10,11 +10,12 @@ pydantic>=2.0
 sqlalchemy>=2.0
 
 # Vector/Document tools (for later)
-# chromadb>=0.4
-# sentence-transformers>=2.5
+chromadb>=0.4
+openai>=1.0
 
 # File parsing
 pypdf>=4.0
+pymupdf>=1.24
 python-docx>=0.8
 
 # Optional: Browser automation (for later)
